@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Воксельный мир</title>
+<style>
+  body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; background:#000; }
+  canvas { display: block; }
+
+  /* Прицел как в Minecraft: два прямоугольника крест-накрест */
+  #crosshair {
+    position: fixed;
+    top: 50%; left: 50%;
+    width: 20px; height: 20px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    user-select: none;
+    z-index: 10;
+    mix-blend-mode: difference;
+  }
+  #crosshair::before,
+  #crosshair::after {
+    content: '';
+    position: absolute;
+    background: #fff;
+  }
+  #crosshair::before { /* горизонтальная */
+    top: 50%; left: 0;
+    width: 100%; height: 2px;
+    transform: translateY(-50%);
+  }
+  #crosshair::after { /* вертикальная */
+    left: 50%; top: 0;
+    width: 2px; height: 100%;
+    transform: translateX(-50%);
+  }
+
+  #info {
+    position: fixed;
+    top: 10px; left: 10px;
+    color: white;
+    background: rgba(0,0,0,0.5);
+    padding: 10px 12px;
+    border-radius: 5px;
+    font-size: 13px;
+    line-height: 1.5;
+    z-index: 10;
+  }
+  #start {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.85);
+    color: white;
+    padding: 30px 60px;
+    border-radius: 10px;
+    text-align: center;
+    cursor: pointer;
+    z-index: 20;
+  }
+  #start h1 { margin: 0 0 15px 0; }
+</style>
+</head>
+<body>
+<div id="crosshair"></div>
+<div id="info">
+  WASD — ходьба<br>
+  Двойной W — бег<br>
+  Мышь — осмотр<br>
+  ЛКМ — сломать блок<br>
+  ПКМ — поставить блок<br>
+  Пробел — прыжок
+</div>
+<div id="start">
+  <h1>Воксельный мир</h1>
+  <p>Нажми, чтобы начать</p>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ===== Сцена =====
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 40, 120);
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+// ===== Освещение =====
+scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+sun.position.set(50, 100, 30);
+scene.add(sun);
+
+// ===== Текстуры =====
+function makeGrassTop() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#4a8a3a';
+  ctx.fillRect(0,0,64,64);
+  for (let i = 0; i < 500; i++) {
+    const x = Math.random()*64, y = Math.random()*64;
+    const g = 80 + Math.random()*80;
+    ctx.fillStyle = `rgb(${30+Math.random()*40},${g},${20+Math.random()*40})`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter;
+  return t;
+}
+function makeDirt() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#7a5230';
+  ctx.fillRect(0,0,64,64);
+  for (let i = 0; i < 600; i++) {
+    const x = Math.random()*64, y = Math.random()*64;
+    const v = 80 + Math.random()*60;
+    ctx.fillStyle = `rgb(${v},${v*0.6},${v*0.3})`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter;
+  return t;
+}
+function makeGrassSide() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#7a5230';
+  ctx.fillRect(0,0,64,64);
+  for (let i = 0; i < 500; i++) {
+    const x = Math.random()*64, y = Math.random()*64;
+    const v = 80 + Math.random()*60;
+    ctx.fillStyle = `rgb(${v},${v*0.6},${v*0.3})`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+  // зелёная верхушка
+  ctx.fillStyle = '#4a8a3a';
+  ctx.fillRect(0,0,64,14);
+  for (let i = 0; i < 120; i++) {
+    const x = Math.random()*64, y = Math.random()*16;
+    const g = 80 + Math.random()*80;
+    ctx.fillStyle = `rgb(${30+Math.random()*40},${g},${20+Math.random()*40})`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter;
+  return t;
+}
+
+const grassTopTex = makeGrassTop();
+const dirtTex     = makeDirt();
+const grassSideTx = makeGrassSide();
+
+const topMat    = new THREE.MeshLambertMaterial({ map: grassTopTex });
+const sideMat   = new THREE.MeshLambertMaterial({ map: grassSideTx });
+const bottomMat = new THREE.MeshLambertMaterial({ map: dirtTex });
+
+const grassMaterials = [sideMat, sideMat, topMat, bottomMat, sideMat, sideMat];
+const blockGeometry  = new THREE.BoxGeometry(1, 1, 1);
+
+// ===== Мир =====
+const blocks = new Map();
+const worldGroup = new THREE.Group();
+scene.add(worldGroup);
+const blockKey = (x,y,z) => `${x},${y},${z}`;
+
+function addBlock(x,y,z) {
+  const k = blockKey(x,y,z);
+  if (blocks.has(k)) return;
+  const m = new THREE.Mesh(blockGeometry, grassMaterials);
+  m.position.set(x,y,z);
+  m.userData.blockPos = {x,y,z};
+  worldGroup.add(m);
+  blocks.set(k, m);
+}
+function removeBlock(x,y,z) {
+  const k = blockKey(x,y,z);
+  const m = blocks.get(k);
+  if (!m) return null;
+  worldGroup.remove(m);
+  blocks.delete(k);
+  return m;
+}
+
+// Платформа 50x50
+const PLATFORM = 50;
+for (let x = -PLATFORM/2; x < PLATFORM/2; x++)
+  for (let z = -PLATFORM/2; z < PLATFORM/2; z++)
+    addBlock(x, 0, z);
+
+// ===== Игрок =====
+const player = {
+  pos: new THREE.Vector3(0, 3, 0), // выше поверхности (ноги на y=1.3 > 0.5)
+  vel: new THREE.Vector3(),
+  yaw: 0, pitch: 0,
+  onGround: false,
+  height: 1.7,
+  radius: 0.3
+};
+
+// ===== Управление клавишами + двойной W для бега =====
+const keys = {};
+let lastWTap = 0;
+let isSprinting = false;
+
+addEventListener('keydown', e => {
+  if (e.repeat) return;
+  keys[e.code] = true;
+  if (e.code === 'KeyW') {
+    const now = performance.now();
+    if (now - lastWTap < 300) {
+      isSprinting = true;
+    }
+    lastWTap = now;
+  }
+});
+addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if (e.code === 'KeyW') isSprinting = false;
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const startDiv = document.getElementById('start');
+startDiv.addEventListener('click', () => renderer.domElement.requestPointerLock());
+document.addEventListener('pointerlockchange', () => {
+  startDiv.style.display =
+    document.pointerLockElement === renderer.domElement ? 'none' : 'block';
+});
+
+document.addEventListener('mousemove', e => {
+  if (document.pointerLockElement !== renderer.domElement) return;
+  player.yaw   -= e.movementX * 0.002;
+  player.pitch -= e.movementY * 0.002;
+  player.pitch = Math.max(-Math.PI/2 + 0.01,
+                   Math.min( Math.PI/2 - 0.01, player.pitch));
+});
+
+// ===== Raycast =====
+const raycaster = new THREE.Raycaster();
+raycaster.far = 6;
+
+function getTargetBlock() {
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  raycaster.set(camera.position, dir);
+  const hits = raycaster.intersectObjects(Array.from(blocks.values()), false);
+  if (!hits.length) return null;
+  const hit = hits[0];
+  const bp = hit.object.userData.blockPos;
+  const n  = hit.face.normal;
+  return {
+    blockPos: bp,
+    adjacent: { x: bp.x + Math.round(n.x),
+                y: bp.y + Math.round(n.y),
+                z: bp.z + Math.round(n.z) },
+    distance: hit.distance
+  };
+}
+
+// ===== Эффект разрушения =====
+const particles = [];
+function spawnBreakEffect(pos) {
+  const count = 14;
+  for (let i = 0; i < count; i++) {
+    const size = 0.05 + Math.random()*0.07; // очень мелкие
+    const geo = new THREE.BoxGeometry(size, size, size);
+    const mat = new THREE.MeshLambertMaterial({
+      color: Math.random() < 0.5 ? 0x4a8a3a : 0x7a5230
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.copy(pos);
+    m.position.x += (Math.random()-0.5)*0.6;
+    m.position.y += (Math.random()-0.5)*0.6;
+    m.position.z += (Math.random()-0.5)*0.6;
+    m.userData.vel = new THREE.Vector3(
+      (Math.random()-0.5)*3,
+      Math.random()*3 + 1.5,
+      (Math.random()-0.5)*3
+    );
+    m.userData.life = 0.6 + Math.random()*0.3;
+    scene.add(m);
+    particles.push(m);
+  }
+}
+function updateParticles(dt) {
+  for (let i = particles.length-1; i >= 0; i--) {
+    const p = particles[i];
+    p.userData.vel.y -= 18 * dt;
+    p.position.addScaledVector(p.userData.vel, dt);
+    p.rotation.x += dt * 6;
+    p.rotation.y += dt * 4;
+    p.userData.life -= dt;
+    if (p.userData.life <= 0 || p.position.y < -10) {
+      scene.remove(p);
+      p.geometry.dispose();
+      p.material.dispose();
+      particles.splice(i, 1);
+    }
+  }
+}
+
+// ===== Мышь =====
+addEventListener('mousedown', e => {
+  if (document.pointerLockElement !== renderer.domElement) return;
+  const t = getTargetBlock();
+  if (!t) return;
+  if (e.button === 0) {
+    const pos = new THREE.Vector3(t.blockPos.x, t.blockPos.y, t.blockPos.z);
+    if (removeBlock(t.blockPos.x, t.blockPos.y, t.blockPos.z)) {
+      spawnBreakEffect(pos);
+    }
+  } else if (e.button === 2) {
+    const a = t.adjacent;
+    // не ставить внутри игрока
+    const p = player.pos;
+    const pMinX = p.x - player.radius, pMaxX = p.x + player.radius;
+    const pMinY = p.y - player.height, pMaxY = p.y + 0.1;
+    const pMinZ = p.z - player.radius, pMaxZ = p.z + player.radius;
+    const bMinX = a.x-0.5, bMaxX = a.x+0.5;
+    const bMinY = a.y-0.5, bMaxY = a.y+0.5;
+    const bMinZ = a.z-0.5, bMaxZ = a.z+0.5;
+    const overlap =
+      pMaxX > bMinX && pMinX < bMaxX &&
+      pMaxY > bMinY && pMinY < bMaxY &&
+      pMaxZ > bMinZ && pMinZ < bMaxZ;
+    if (!overlap) addBlock(a.x, a.y, a.z);
+  }
+});
+addEventListener('contextmenu', e => e.preventDefault());
+
+// ===== Коллизии =====
+function collides(px, py, pz) {
+  const minX = px - player.radius, maxX = px + player.radius;
+  const minY = py - player.height, maxY = py + 0.1;
+  const minZ = pz - player.radius, maxZ = pz + player.radius;
+  const bx0 = Math.floor(minX + 0.5), bx1 = Math.floor(maxX + 0.5);
+  const by0 = Math.floor(minY + 0.5), by1 = Math.floor(maxY + 0.5);
+  const bz0 = Math.floor(minZ + 0.5), bz1 = Math.floor(maxZ + 0.5);
+  for (let x = bx0; x <= bx1; x++)
+  for (let y = by0; y <= by1; y++)
+  for (let z = bz0; z <= bz1; z++) {
+    if (!blocks.has(blockKey(x,y,z))) continue;
+    if (maxX > x-0.5 && minX < x+0.5 &&
+        maxY > y-0.5 && minY < y+0.5 &&
+        maxZ > z-0.5 && minZ < z+0.5) return true;
+  }
+  return false;
+}
+
+function updatePlayer(dt) {
+  const baseSpeed = isSprinting ? 8 : 5;
+  const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+  const right   = new THREE.Vector3( Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+  const move = new THREE.Vector3();
+  if (keys['KeyW']) move.add(forward);
+  if (keys['KeyS']) move.sub(forward);
+  if (keys['KeyD']) move.add(right);
+  if (keys['KeyA']) move.sub(right);
+  if (move.lengthSq() > 0) move.normalize().multiplyScalar(baseSpeed);
+
+  player.vel.x = move.x;
+  player.vel.z = move.z;
+  player.vel.y -= 22 * dt;
+
+  if (keys['Space'] && player.onGround) {
+    player.vel.y = 8.5;
+    player.onGround = false;
+  }
+
+  let nx = player.pos.x + player.vel.x * dt;
+  if (!collides(nx, player.pos.y, player.pos.z)) player.pos.x = nx;
+  else player.vel.x = 0;
+
+  let nz = player.pos.z + player.vel.z * dt;
+  if (!collides(player.pos.x, player.pos.y, nz)) player.pos.z = nz;
+  else player.vel.z = 0;
+
+  let ny = player.pos.y + player.vel.y * dt;
+  if (!collides(player.pos.x, ny, player.pos.z)) {
+    player.pos.y = ny;
+    player.onGround = false;
+  } else {
+    if (player.vel.y < 0) player.onGround = true;
+    player.vel.y = 0;
+  }
+
+  if (player.pos.y < -20) {
+    player.pos.set(0, 3, 0);
+    player.vel.set(0,0,0);
+  }
+}
+
+// ===== Подсветка блока =====
+const highlight = new THREE.Mesh(
+  new THREE.BoxGeometry(1.01, 1.01, 1.01),
+  new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.55
+  })
+);
+highlight.visible = false;
+scene.add(highlight);
+
+// ===== Главный цикл =====
+let lastTime = performance.now();
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+  if (dt > 0.1) dt = 0.1;
+
+  if (document.pointerLockElement === renderer.domElement) updatePlayer(dt);
+  updateParticles(dt);
+
+  camera.position.copy(player.pos);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = player.yaw;
+  camera.rotation.x = player.pitch;
+
+  const t = getTargetBlock();
+  if (t) {
+    highlight.visible = true;
+    highlight.position.set(t.blockPos.x, t.blockPos.y, t.blockPos.z);
+  } else {
+    highlight.visible = false;
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
